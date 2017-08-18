@@ -1,0 +1,330 @@
+*read in raw data;
+data raw;
+length job_function $12;
+infile '/home/slcoyne0/Data Sources/HR_comma_sep.csv' DLM=',' FIRSTOBS=2;
+input satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company work_accident $ left promotion_last_5_years job_function $ salary $;
+run;
+
+*make a frequency table of dependent variable to understand balance;
+proc freq data=raw;
+tables left;
+run;
+
+*baseline EDA for discrete variables;
+ods graphics on;
+proc freq data=raw;
+tables number_projects time_spend_company work_accident left promotion_last_5_years job_function salary /plots=Freqplot(scale=freq);
+run;
+
+*baseline EDA for continuous variables pt.1;
+proc univariate data=raw;
+var satisfaction_level;
+hist/normal;
+run;
+
+*baseline EDA for continuous variables pt.2;
+proc univariate data=raw;
+var last_evaluation;
+hist/normal;
+run;
+
+*baseline EDA for continuous variables pt.3;
+proc univariate data=raw;
+var average_monthly_hours;
+hist/normal;
+run;
+
+*EDA by response level for discrete variables part 1;
+proc freq data=raw;
+tables left*number_projects / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for discrete variables part 2;
+proc freq data=raw;
+tables left*time_spend_company / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for discrete variables part 3;
+proc freq data=raw;
+tables left*work_accident / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for discrete variables part 4;
+proc freq data=raw;
+tables left*promotion_last_5_years / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for discrete variables part 5;
+proc freq data=raw;
+tables left*job_function / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for discrete variables part 6;
+proc freq data=raw;
+tables left*salary / plots=FreqPlot(twoway=cluster scale=Freq);
+run;
+
+*EDA by response level for continuous variables part 1;
+proc sgplot data=raw;
+vbox satisfaction_level / category=left group=left;
+yaxis label = "Job Satisfaction Rating";
+keylegend / Title = "Left the Company 1 = Yes 0 = No";
+run;
+
+*EDA by response level for continuous variables part 2;
+proc sgplot data=raw;
+vbox last_evaluation / category=left group=left;
+yaxis label = "Last Evaluation Score";
+keylegend / Title = "Left the Company 1 = Yes 0 = No";
+run;
+
+*EDA by response level for continuous variables part 3;
+proc sgplot data=raw;
+vbox average_monthly_hours / category=left group=left;
+yaxis label = "Average Monthly Hours";
+keylegend / Title = "Left the Company 1 = Yes 0 = No";
+run;
+
+*correlation matrix to understand multicollinearity;
+proc corr data=raw;
+var satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company;
+run;
+
+*test for VIF;
+proc reg data = raw;
+model left = satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company/vif tol collin;
+run;quit;
+
+*create train/test partition using 70_30 split;
+DATA train test;
+SET raw;
+Random1 = RANUNI(14380132);
+IF Random1 < 0.7 THEN output train;
+            ELSE output test;
+Run;
+
+*==preliminary_model==;
+
+*make preliminary model and store specify outmodel to train_results1;
+ods graphics on;
+proc logistic data=train outmodel = train_results1 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company / LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results1 and output predictions to testpred1;
+ods graphics on;
+proc logistic inmodel=train_results1;
+score data=test out=testpred1 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred1;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==no interaction==;
+
+*==forward_selection==;
+
+*make a model and store specify outmodel to train_results2_1;
+ods graphics on;
+proc logistic data=train outmodel = train_results2_1 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company / selection = forward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results2_1 and output predictions to testpred2_1;
+ods graphics on;
+proc logistic inmodel=train_results2_1;
+score data=test out=testpred2_1 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred2_1;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==backward_selection==;
+
+*make a model and store specify outmodel to train_results2_2;
+ods graphics on;
+proc logistic data=train outmodel = train_results2_2 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company / selection = backward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results2_2 and output predictions to testpred2_2;
+ods graphics on;
+proc logistic inmodel=train_results2_2;
+score data=test out=testpred2_2 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred2_2;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==stepwise_selection==;
+
+*make a model and store specify outmodel to train_results2_3;
+ods graphics on;
+proc logistic data=train outmodel = train_results2_3 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company / selection = stepwise LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results2_3 and output predictions to testpred2_3;
+ods graphics on;
+proc logistic inmodel=train_results2_3;
+score data=test out=testpred2_3 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred2_3;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==with interaction==;
+
+*==forward_selection==;
+
+*make a model and store specify outmodel to train_results3_1;
+ods graphics on;
+proc logistic data=train outmodel = train_results3_1 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = forward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results3_1 and output predictions to testpred3_1;
+ods graphics on;
+proc logistic inmodel=train_results3_1;
+score data=test out=testpred3_1 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred3_1;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==backward_selection==;
+
+*make a model and store specify outmodel to train_results3_2;
+ods graphics on;
+proc logistic data=train outmodel = train_results3_2 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = backward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results3_2 and output predictions to testpred3_2;
+ods graphics on;
+proc logistic inmodel=train_results3_2;
+score data=test out=testpred3_2 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred3_2;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==stepwise_selection==;
+
+*make a model and store specify outmodel to train_results3_3;
+ods graphics on;
+proc logistic data=train outmodel = train_results3_3 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = stepwise LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results3_3 and output predictions to testpred3_3;
+ods graphics on;
+proc logistic inmodel=train_results3_3;
+score data=test out=testpred3_3 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred3_3;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==interaction w categorical=;
+
+*==forward_selection==;
+
+*make a model and store specify outmodel to train_results4_1;
+ods graphics on;
+proc logistic data=train outmodel = train_results4_1 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company work_accident | promotion_last_5_years | satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = forward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results4_1 and output predictions to testpred4_1;
+ods graphics on;
+proc logistic inmodel=train_results4_1;
+score data=test out=testpred4_1 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred4_1;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==backward_selection==;
+
+*make a model and store specify outmodel to train_results4_2;
+ods graphics on;
+proc logistic data=train outmodel = train_results4_2 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company work_accident | promotion_last_5_years | satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = backward LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results4_2 and output predictions to testpred4_2;
+ods graphics on;
+proc logistic inmodel=train_results4_2;
+score data=test out=testpred4_2 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred4_2;
+table F_left*I_left / nocol nocum nopercent;
+run;
+
+*==stepwise_selection==;
+
+*make a model and store specify outmodel to train_results4_3;
+ods graphics on;
+proc logistic data=train outmodel = train_results4_3 descending plots(only)=(roc(id=obs) effect);
+class work_accident (ref = "0") promotion_last_5_years (ref = "1") job_function salary / param = ref;
+model left(event='1')= work_accident promotion_last_5_years job_function salary satisfaction_level last_evaluation number_projects average_monthly_hours time_spend_company work_accident | promotion_last_5_years | satisfaction_level | last_evaluation | number_projects | average_monthly_hours | time_spend_company @2/selection = stepwise LACKFIT outroc=troc ctable pprob = (0.5);
+effectplot fit / obs(jitter(y=0.02)) link;
+roc; roccontrast;
+run;
+
+*proc logistic with inmodel statement using train_results4_3 and output predictions to testpred4_3;
+ods graphics on;
+proc logistic inmodel=train_results4_3;
+score data=test out=testpred4_3 outroc=vroc;
+run;
+
+*make a confusion matrix;
+proc freq data=testpred4_3;
+table F_left*I_left / nocol nocum nopercent;
+run;
